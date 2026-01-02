@@ -1,18 +1,35 @@
 package main
 
 import (
-	"fmt"
+	"database/sql"
 	"log"
 	"net/http"
+	"os"
 	"sync/atomic"
+
+	"github.com/ghis9917/chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 func main() {
 
+	godotenv.Load()
 	const filepathRoot = "."
 	const port = "8080"
+
+	platform := os.Getenv("PLATFORM")
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dbQueries := database.New(db)
+
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
+		db:             dbQueries,
+		platform:       platform,
 	}
 
 	mux := http.NewServeMux()
@@ -27,10 +44,15 @@ func main() {
 			),
 		),
 	)
+
 	mux.HandleFunc("GET /admin/metrics", apiCfg.middlewareMetricsGet)
 	mux.HandleFunc("POST /admin/reset", apiCfg.middlewareMetricsReset)
+
 	mux.HandleFunc("GET /api/healthz", handleReadiness)
-	mux.HandleFunc("POST /api/validate_chirp", handleValidateChirp)
+	mux.HandleFunc("GET /api/chirps", apiCfg.middlewareGetAllChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.middlewareGetChirpByID)
+	mux.HandleFunc("POST /api/chirps", apiCfg.middlewareCreateChirp)
+	mux.HandleFunc("POST /api/users", apiCfg.middlewareCreateUser)
 
 	server := http.Server{
 		Addr:    ":" + port,
@@ -49,38 +71,4 @@ func handleReadiness(w http.ResponseWriter, req *http.Request) {
 		http.StatusOK,
 		[]byte(http.StatusText(http.StatusOK)),
 	)
-}
-
-func handleValidateChirp(w http.ResponseWriter, req *http.Request) {
-
-	params, err := extractParams(validateChirpParameters{}, req)
-	if err != nil {
-
-		sendJSONResponse(
-			w,
-			http.StatusInternalServerError,
-			jsonErr{Error: fmt.Sprintf("%s", err)},
-		)
-
-		return
-	}
-
-	if len(params.Body) > VALID_CHIRP_LENGTH {
-		log.Printf("Invalid Chirp")
-
-		sendJSONResponse(
-			w,
-			http.StatusBadRequest,
-			jsonErr{Error: "Chirp is too long"},
-		)
-
-		return
-	}
-
-	sendJSONResponse(
-		w,
-		http.StatusOK,
-		validateChirpResponse{CleanedBody: cleanChirp(params.Body)},
-	)
-
 }
