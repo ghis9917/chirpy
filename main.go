@@ -20,6 +20,9 @@ func main() {
 
 	platform := os.Getenv("PLATFORM")
 	dbURL := os.Getenv("DB_URL")
+	serverSecret := os.Getenv("SERVER_SECRET")
+	polkaSecret := os.Getenv("POLKA_KEY")
+
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatal(err)
@@ -30,6 +33,8 @@ func main() {
 		fileserverHits: atomic.Int32{},
 		db:             dbQueries,
 		platform:       platform,
+		serverSecret:   serverSecret,
+		polkaSecret:    polkaSecret,
 	}
 
 	mux := http.NewServeMux()
@@ -44,15 +49,24 @@ func main() {
 			),
 		),
 	)
-
-	mux.HandleFunc("GET /admin/metrics", apiCfg.middlewareMetricsGet)
-	mux.HandleFunc("POST /admin/reset", apiCfg.middlewareMetricsReset)
-
+	// ============ ADMIN =============
+	mux.HandleFunc("GET /admin/metrics", apiCfg.handleGetMetrics)
+	mux.HandleFunc("POST /admin/reset", apiCfg.handleResetMetrics)
+	// ============ API GET =============
 	mux.HandleFunc("GET /api/healthz", handleReadiness)
-	mux.HandleFunc("GET /api/chirps", apiCfg.middlewareGetAllChirps)
-	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.middlewareGetChirpByID)
-	mux.HandleFunc("POST /api/chirps", apiCfg.middlewareCreateChirp)
-	mux.HandleFunc("POST /api/users", apiCfg.middlewareCreateUser)
+	mux.HandleFunc("GET /api/chirps", apiCfg.handleGetAllChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handleGetChirpByID)
+	// ============ API POST =============
+	mux.HandleFunc("POST /api/chirps", apiCfg.handleCreateChirp)
+	mux.HandleFunc("POST /api/users", apiCfg.handleCreateUser)
+	mux.HandleFunc("POST /api/login", apiCfg.handleLogin)
+	mux.HandleFunc("POST /api/refresh", apiCfg.handleRefresh)
+	mux.HandleFunc("POST /api/revoke", apiCfg.handleRevoke)
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.handleUpgradeUser)
+	// ============ API PUT =============
+	mux.HandleFunc("PUT /api/users", apiCfg.handleUpdateUser)
+	// ============ API DELETE =============
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handleDeleteChirpByID)
 
 	server := http.Server{
 		Addr:    ":" + port,
@@ -62,13 +76,4 @@ func main() {
 	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
 	log.Fatal(server.ListenAndServe())
 
-}
-
-func handleReadiness(w http.ResponseWriter, req *http.Request) {
-	sendResponse(
-		w,
-		CONTENT_TYPE_PLAIN_TEXT,
-		http.StatusOK,
-		[]byte(http.StatusText(http.StatusOK)),
-	)
 }
